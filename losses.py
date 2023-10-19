@@ -4,8 +4,9 @@ from typing import List, Tuple, Union
 
 
 class FinalDiscriminatorLoss(nn.Module):
-    def __init__(self, return_only_final_loss: bool = True) -> None:
+    def __init__(self, final_disc_loss_weight: float = 1.0, return_only_final_loss: bool = True) -> None:
         super().__init__()
+        self.final_disc_loss_weight = final_disc_loss_weight
         self.return_only_final_loss = return_only_final_loss
 
     def calculate_gan_discriminator_loss(
@@ -28,6 +29,7 @@ class FinalDiscriminatorLoss(nn.Module):
         final_discriminator_loss, disc_real_true_loss, disc_real_pred_loss = self.calculate_gan_discriminator_loss(
             disc_true_output, disc_pred_output
         )
+        final_discriminator_loss *= self.final_disc_loss_weight
         if self.return_only_final_loss:
             return final_discriminator_loss
         else:

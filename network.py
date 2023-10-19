@@ -20,15 +20,20 @@ class ImageEncoder(nn.Module):
         self.hidden_dim = hidden_dim
         self.latent_dim = latent_dim
         self.epsilon = epsilon
-        self.linear_in = nn.Linear(in_dim, hidden_dim)
-        self.linear_hidden = nn.ModuleList([nn.Linear(hidden_dim, hidden_dim) for _ in range(n_hidden_layers)])
-        self.linear_out = nn.Linear(hidden_dim, latent_dim * 2)
+        self.linear_in = nn.Linear(in_dim, hidden_dim * 2)
+        self.linear_condition = nn.Linear(condition_dim, hidden_dim * 2 * n_hidden_layers)
+        self.linear_hidden = nn.ModuleList([nn.Linear(hidden_dim, hidden_dim * 2) for _ in range(n_hidden_layers)])
+        self.linear_out = nn.Linear(hidden_dim * 2, latent_dim * 2)
+        self.condition_mix_layer = TanhSigmoidMultiplyCondition(hidden_dim)
         self.dropout = nn.Dropout(dropout_ratio)
 
     def forward(self, input: torch.Tensor, condition: torch.Tensor) -> Tuple[torch.Tensor]:
         output = torch.flatten(input, start_dim=1)
         output = self.linear_in(output)
+        condition = self.linear_condition(condition)
         for i, layer in enumerate(self.linear_hidden):
+            condition_seg = condition[:, i * self.hidden_dim * 2 : (i + 1) * self.hidden_dim * 2]
+            output = self.condition_mix_layer(output, condition_seg)
             output = self.dropout(torch.tanh(layer(output)))
         output = self.linear_out(output)
         mean, std = torch.split(output, self.latent_dim, dim=1)
@@ -41,33 +46,31 @@ class ImageDecoder(nn.Module):
     def __init__(
         self,
         latent_dim: int = 2,
-        condition_dim: int = 4,
         hidden_dim: int = 32,
         out_dim: int = 784,
         n_hidden_layers: int = 2,
         dropout_ratio: float = 0.1,
     ) -> None:
         super().__init__()
-        self.out_dim = out_dim
         self.hidden_dim = hidden_dim
         self.linear_in = nn.Linear(latent_dim, hidden_dim)
         self.linear_hidden = nn.ModuleList([nn.Linear(hidden_dim, hidden_dim) for _ in range(n_hidden_layers)])
         self.linear_out = nn.Linear(hidden_dim, out_dim)
         self.dropout = nn.Dropout(dropout_ratio)
 
-    def forward(self, input: torch.Tensor, condition: torch.Tensor) -> torch.Tensor:
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
         output = self.linear_in(input)
         for i, layer in enumerate(self.linear_hidden):
             output = self.dropout(torch.relu(layer(output)))
         output = torch.sigmoid(self.linear_out(output))
-        output = output.view(-1, 1, int(self.out_dim**0.5), int(self.out_dim**0.5))
+        output = output.view(-1, 1, 28, 28)
         return output
 
 
 class HyperNetwork(nn.Module):
     """https://arxiv.org/abs/1609.09106"""
 
-    def __init__(self, in_out_dim, hidden_dim, width, condition_dim):
+    def __init__(self, in_out_dim, hidden_dim, width):
         super().__init__()
 
         blocksize = width * in_out_dim
@@ -118,8 +121,8 @@ class TanhSigmoidMultiplyCondition(nn.Module):
         super().__init__()
         self.hidden_dim = hidden_dim
 
-    def forward(self, z: torch.Tensor, condition: torch.Tensor) -> torch.Tensor:
-        in_act = z + condition
+    def forward(self, input: torch.Tensor, condition: torch.Tensor) -> torch.Tensor:
+        in_act = input + condition
         t_act = torch.tanh(in_act[:, : self.hidden_dim])
         s_act = torch.sigmoid(in_act[:, self.hidden_dim :])
         output = t_act * s_act
@@ -127,12 +130,12 @@ class TanhSigmoidMultiplyCondition(nn.Module):
 
 
 class ODEFunc(nn.Module):
-    def __init__(self, in_out_dim, hidden_dim, condition_dim, width):
+    def __init__(self, in_out_dim, hidden_dim, width):
         super().__init__()
         self.in_out_dim = in_out_dim
         self.hidden_dim = hidden_dim
         self.width = width
-        self.hyper_net = HyperNetwork(in_out_dim, hidden_dim, width, condition_dim)
+        self.hyper_net = HyperNetwork(in_out_dim, hidden_dim, width)
 
     def trace_df_dz(self, f, z):
         """Calculates the trace (equals to det) of the Jacobian df/dz."""
@@ -261,7 +264,6 @@ class VAECNF(nn.Module):
         )
         self.image_decoder = ImageDecoder(
             latent_dim=latent_dim,
-            condition_dim=condition_dim,
             hidden_dim=hidden_dim,
             out_dim=in_out_dim,
             n_hidden_layers=n_hidden_layers,
@@ -270,7 +272,6 @@ class VAECNF(nn.Module):
         self.ode_func = ODEFunc(
             in_out_dim=latent_dim,
             hidden_dim=ode_hidden_dim,
-            condition_dim=condition_dim,
             width=ode_width,
         )
 
@@ -278,7 +279,7 @@ class VAECNF(nn.Module):
         condition = self.condition_embedding_layer(condition)
 
         z_t1, mean, std = self.image_encoder(input, condition)
-        reconstructed = self.image_decoder(z_t1, condition)
+        reconstructed = self.image_decoder(z_t1)
 
         logp_diff_t1 = torch.zeros(self.batch_size, 1).type(torch.float32).to(self.device)
         z_t, logp_diff_t = odeint(
@@ -295,13 +296,15 @@ class VAECNF(nn.Module):
 
         return reconstructed, logp_x, mean, std
 
-    def generate(self, condition: torch.Tensor, n_time_steps: int = 2) -> Tuple[torch.Tensor]:
+    def generate(
+        self, n_samples: int = 1, n_time_steps: int = 2, return_all_time_steps: bool = True
+    ) -> Tuple[torch.Tensor]:
         with torch.no_grad():
-            z_t0 = self.p_z0.sample([1]).to(self.device)
-            logp_diff_t0 = torch.zeros(1, 1).type(torch.float32).to(self.device)
+            z_t0 = self.p_z0.sample([n_samples]).to(self.device)
+            logp_diff_t0 = torch.zeros(n_samples, 1).type(torch.float32).to(self.device)
 
             time_space = np.linspace(self.t0, self.t1, n_time_steps)  # [T0, T1] for generation
-            z_t_samples, _ = odeint(
+            gen_latents, _ = odeint(
                 self.ode_func,
                 (z_t0, logp_diff_t0),
                 torch.tensor(time_space).to(self.device),
@@ -309,7 +312,14 @@ class VAECNF(nn.Module):
                 rtol=1e-5,
                 method="dopri5",
             )
-            z_t_samples = z_t_samples.view(n_time_steps, -1)
-            gen_image = self.image_decoder(z_t_samples, condition)
 
-        return gen_image, time_space
+            if not return_all_time_steps:
+                gen_latents = gen_latents[-1]
+                n_time_steps = 1
+            gen_latents = gen_latents.transpose(0, 1).contiguous().view(-1, self.latent_dim)
+            gen_images = self.image_decoder(gen_latents)
+
+            gen_latents = gen_latents.view(n_samples, n_time_steps, self.latent_dim)
+            gen_images = gen_images.view(n_samples, n_time_steps, 1, 28, 28)
+
+        return gen_images, gen_latents, time_space

@@ -121,7 +121,6 @@ def load_checkpoint(
 
 def visualize_inference_result(
     z_t_samples: torch.Tensor,
-    condition: int,
     time_space: np.array,
     save_dirpath: str,
     global_step: int,

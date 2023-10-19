@@ -18,11 +18,11 @@ def get_args():
 
     parser.add_argument("--data_dirpath", type=str, default="./.data/")
     parser.add_argument("--batch_size", type=int, default=512)
-    parser.add_argument("--n_epochs", type=int, default=35)
+    parser.add_argument("--n_epochs", type=int, default=43)
     parser.add_argument("--log_interval", type=int, default=25)
     parser.add_argument("--eval_interval", type=int, default=100)
     parser.add_argument("--lr_gen", type=float, default=0.002)
-    parser.add_argument("--lr_disc", type=float, default=0.02)
+    parser.add_argument("--lr_disc", type=float, default=0.008)
 
     parser.add_argument("--in_out_dim", type=int, default=784)
     parser.add_argument("--hidden_dim", type=int, default=32)
@@ -39,10 +39,11 @@ def get_args():
     parser.add_argument("--recon_loss_weight", type=float, default=3.0)
     parser.add_argument("--kl_divergence_weight", type=float, default=0.1)
     parser.add_argument("--cnf_loss_weight", type=float, default=0.1)
+    parser.add_argument("--final_disc_loss_weight", type=float, default=5.0)
 
     parser.add_argument("--viz", type=bool, default=True)
     parser.add_argument("--n_viz_time_steps", type=int, default=11)
-    parser.add_argument("--log_dirpath", type=str, default="./logs/vae_cnf_notconddisc_0/")
+    parser.add_argument("--log_dirpath", type=str, default="./logs/vae_cnf_encconddisc_final/")
 
     parser.add_argument("--gen_checkpoint_filepath", type=str, default="")
     parser.add_argument("--disc_checkpoint_filepath", type=str, default="")
@@ -246,10 +247,8 @@ def train_and_evaluate(
 
         # visualization
         if viz:
-            condition = label[:1]
-            z_t_samples, time_space = generator.generate(condition, n_viz_time_steps)
-            condition = condition[0].cpu().item()
-            utils.visualize_inference_result(z_t_samples, condition, time_space, viz_save_dirpath, global_step)
+            gen_images, _, time_space = generator.generate(1, n_viz_time_steps, True)
+            utils.visualize_inference_result(gen_images[0], time_space, viz_save_dirpath, global_step)
 
     epoch_pbar = tqdm(range(n_epochs))
     for _ in epoch_pbar:
@@ -309,8 +308,8 @@ def main(args):
     discriminator_n_params = utils.count_parameters(discriminator)
     logger.info(f"generator_n_params: {generator_n_params}, discriminator_n_params: {discriminator_n_params}")
 
-    optimizer_generator = torch.optim.Adam(generator.parameters(), lr=args.learning_rate)
-    optimizer_discriminator = torch.optim.Adam(discriminator.parameters(), lr=args.learning_rate)
+    optimizer_generator = torch.optim.Adam(generator.parameters(), lr=args.lr_gen)
+    optimizer_discriminator = torch.optim.Adam(discriminator.parameters(), lr=args.lr_disc)
 
     if args.gen_checkpoint_filepath:
         epoch, global_step, generator, optimizer_generator = utils.load_checkpoint(
@@ -334,7 +333,9 @@ def main(args):
         cnf_loss_weight=args.cnf_loss_weight,
         return_only_final_loss=False,
     )
-    criterion_discriminator = losses.FinalDiscriminatorLoss(return_only_final_loss=False)
+    criterion_discriminator = losses.FinalDiscriminatorLoss(
+        final_disc_loss_weight=args.final_disc_loss_weight, return_only_final_loss=False
+    )
 
     train_and_evaluate(
         epoch=epoch,

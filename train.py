@@ -17,16 +17,16 @@ def get_args():
     parser.add_argument("--seed", type=int, default=1234)
 
     parser.add_argument("--data_dirpath", type=str, default="./.data/")
-    parser.add_argument("--batch_size", type=int, default=512)
-    parser.add_argument("--n_epochs", type=int, default=43)
+    parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--n_epochs", type=int, default=50)
     parser.add_argument("--log_interval", type=int, default=25)
     parser.add_argument("--eval_interval", type=int, default=100)
     parser.add_argument("--lr_gen", type=float, default=0.002)
-    parser.add_argument("--lr_disc", type=float, default=0.008)
+    parser.add_argument("--lr_disc", type=float, default=0.004)
 
     parser.add_argument("--in_out_dim", type=int, default=784)
     parser.add_argument("--hidden_dim", type=int, default=32)
-    parser.add_argument("--latent_dim", type=int, default=2)
+    parser.add_argument("--latent_dim", type=int, default=8)
     parser.add_argument("--ode_t0", type=int, default=0)
     parser.add_argument("--ode_t1", type=int, default=10)
     parser.add_argument("--cov_value", type=float, default=0.1)
@@ -39,16 +39,16 @@ def get_args():
     parser.add_argument("--recon_loss_weight", type=float, default=3.0)
     parser.add_argument("--kl_divergence_weight", type=float, default=0.1)
     parser.add_argument("--cnf_loss_weight", type=float, default=0.1)
-    parser.add_argument("--final_disc_loss_weight", type=float, default=5.0)
+    parser.add_argument("--final_disc_loss_weight", type=float, default=2.0)
 
     parser.add_argument("--viz", type=bool, default=True)
     parser.add_argument("--n_viz_time_steps", type=int, default=11)
-    parser.add_argument("--log_dirpath", type=str, default="./logs/vae_cnf_encconddisc_final/")
+    parser.add_argument("--log_dirpath", type=str, default="./logs/final_ver/")
 
     parser.add_argument("--gen_checkpoint_filepath", type=str, default="")
     parser.add_argument("--disc_checkpoint_filepath", type=str, default="")
 
-    parser.add_argument("--device", type=str, default="cuda:1")
+    parser.add_argument("--device", type=str, default="cuda:3")
     return parser.parse_args()
 
 

@@ -48,7 +48,7 @@ def get_args():
     parser.add_argument("--gen_checkpoint_filepath", type=str, default="")
     parser.add_argument("--disc_checkpoint_filepath", type=str, default="")
 
-    parser.add_argument("--device", type=str, default="cuda:3")
+    parser.add_argument("--device", type=str, default="cuda:0")
     return parser.parse_args()
 
 
